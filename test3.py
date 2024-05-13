@@ -6,6 +6,7 @@ import numpy as np
 from ctypes import *
 from GigECamera_Types import *
 from MVGigE import *
+from setCameraProperties import *
 
 # Assuming 'IMAGE_INFO' and other necessary classes are already imported from 'GigECamera_Types.py'
 
