@@ -1,0 +1,15 @@
+# dir 不需要提交的目录
+/.vs
+/_pycache_
+/build
+​
+# file 不需要提交的文件名
+​
+# 不需要提交的任意包含后缀名为bmp等的文件
+*.bmp
+*.jpg
+*.jpeg
+*.png
+
+
+​

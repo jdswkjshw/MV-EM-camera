@@ -1,13 +1,24 @@
 import sys
 import os
+import datetime
 import shutil
+import serial
+import cv2
+import time
 from MVGigE import *
+from setCameraProperties import *
 from PyQt5.QtWidgets import QApplication, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QLabel, QFileDialog, QScrollArea, QComboBox, QLineEdit, QSlider, QGridLayout, QGroupBox, QCheckBox
 from PyQt5.QtGui import QPixmap, QPalette, QImage, QIcon
 from PyQt5.QtCore import Qt
-
+import numpy
+# reference coordinates
+global x,y,i
+x=0
+y=0
+i=True
 
 class MVCam(QWidget):
+    global x,y,i
     def __init__(self):
         super().__init__()
         self.initUI()
@@ -25,7 +36,7 @@ class MVCam(QWidget):
         self.combo.setCurrentIndex(2)
         self.btnStart = QPushButton('开始采集', self)
         self.btnPause = QPushButton('暂停采集', self)
-        self.btnSave = QPushButton('保存图像', self)
+        self.btnSave = QPushButton('测量模式', self)
         self.btnSetting = QPushButton('设置', self)
         self.btnClose = QPushButton('关闭相机', self)
         self.combo.setEnabled(False)
@@ -62,7 +73,7 @@ class MVCam(QWidget):
         self.combo.activated[str].connect(self.setSize)
         self.btnStart.clicked.connect(self.startGrab)
         self.btnPause.clicked.connect(self.pauseGrab)
-        self.btnSave.clicked.connect(self.saveImage)
+        self.btnSave.clicked.connect(self.calculateImage)
         self.btnSetting.clicked.connect(self.setting)
         self.btnClose.clicked.connect(self.closeCam)
         self.show()
@@ -109,6 +120,11 @@ class MVCam(QWidget):
         self.width = w.width
         self.height = h.height
         self.pixelFormat = pf.pixelFormat
+        fps=25.00
+        if MVSetFrameRate(self.hCam, fps).status != MVSTATUS_CODES.MVST_SUCCESS:
+            msgBox = QMessageBox(QMessageBox.Warning, '提示', '刷新帧率设置失败！')
+            msgBox.exec()
+            return
         if(self.pixelFormat == MV_PixelFormatEnums.PixelFormat_Mono8):
             self.himage = MVImageCreate(self.width, self.height, 8).himage  # 创建图像句柄
         else:
@@ -141,12 +157,60 @@ class MVCam(QWidget):
             MVSetGrabWindow(self.hCam, width, height)
 
     def startGrab(self):  # 开始采集执行本函数
+        global x,y,i
         mode = MVGetTriggerMode(self.hCam)  # 获取当前相机采集模式
         source = MVGetTriggerSource(self.hCam)  # 获取当前相机信号源
         if(self.sender().text() == '开始采集'):
             if(mode.pMode == TriggerModeEnums.TriggerMode_Off):  # 当触发模式关闭的时候，界面的行为
                 self.btnStart.setText('停止采集')
                 MVStartGrabWindow(self.hCam, self.winid)  # 将采集的图像传输到指定窗口
+                # save the current image and get the x&y as reference
+                time.sleep(0.2)
+                while i:
+
+                    MVGetSampleGrab(self.hCam, self.himage)
+                    # print(idn.idn)
+                    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.bmp")
+                    MVImageSave(self.himage, image_path.encode('utf-8'))
+                    print(image_path)
+                    img = cv2.imread(str(image_path))
+                    # cv2.imshow("1",img)
+                    # cv2.waitKey()
+                    image_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.jpg")
+                    cv2.imwrite(str(image_path),img)
+                    img=cv2.imread(str(image_path))
+                    #cv2.imshow("1",img)
+                    #cv2.waitKey()
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    #Acv2.imshow("2",img)
+                    #Acv2.waitKey()
+                    # Apply Gaussian Blur for noise reduction
+                    #blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
+                    #cv2.imshow("blurr", blurred_img)
+
+                    # Binarization
+                    _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+                    #cv2.imshow("binary", binary_img)
+
+                    # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
+                    contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    largest_contour = max(contours, key=cv2.contourArea)
+                    M = cv2.moments(largest_contour)
+                    x,y = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                    #print(x,y)
+                    # Draw and display the processed image
+                    #cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
+
+                    #cv2.imshow("Processed Image", img)
+                    #cv2.waitKey()
+                    # Cleanup
+                    # cv2.destroyAllWindows()
+
+                    i=False
+
+                # button actions
+
                 self.btnOpen.setEnabled(False)
                 self.combo.setEnabled(True)
                 self.btnStart.setEnabled(True)
@@ -154,6 +218,7 @@ class MVCam(QWidget):
                 self.btnSave.setEnabled(True)
                 self.btnSetting.setEnabled(False)
                 self.btnClose.setEnabled(True)
+                
             else:
                 if( source.source == TriggerSourceEnums.TriggerSource_Software):  # 当触发模式打开且为软触发的时候，界面的行为
                     MVStartGrabWindow(self.hCam, self.winid)  # 将采集的图像传输到指定窗口
@@ -207,29 +272,84 @@ class MVCam(QWidget):
             self.btnSetting.setEnabled(False)
             self.btnClose.setEnabled(True)
 
-    def saveImage(self):  # 保存图片执行本函数，在非触发模式时，只有采集暂停是才可以保存
-        idn = MVGetSampleGrab(self.hCam, self.himage)
-        print(idn.idn)
-        fname, ok = QFileDialog.getSaveFileName(self, '打开文件', './Images' + str(idn.idn) + '.bmp', ("Images (*.bmp *.jpg *.tif *.raw)"))
-        if ok:
-            try:
-              filename = os.path.basename(fname)  # 获取到需要存储的文件名
-              pathname = os.path.join(os.getcwd(), filename)  # 获取带有文件名的文件路径
-              newfile = '\\'.join(fname.split('/')[:-1])  # 需要存储到的新文件夹
-              print(pathname)
-              MVImageSave(self.himage, filename.encode('utf-8'))  # 将图片保存下来
-              if (newfile != os.getcwd()):  # 将图片移动到指定文件夹下
-                  try:
-                      shutil.move(pathname, newfile)
-                  except:
-                      os.unlink(os.path.join(newfile, filename))
-                      shutil.move(pathname, newfile)
-              image = QImage(newfile + '\\' + filename)
-              self.label.setPixmap(QPixmap.fromImage(image))  # 加载图片
-            except:
-               return 0
-        else:
-            return 0
+    def calculateImage(self):  # 保存图片执行本函数，在非触发模式时，只有采集暂停是才可以保存
+        global i
+        i=True
+        tempx=0
+        tempy=0
+        flag=1
+        while i:
+                    
+                    MVGetSampleGrab(self.hCam, self.himage)
+                    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    image_path1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.bmp")
+                    MVImageSave(self.himage, image_path1.encode('utf-8'))
+                    img = cv2.imread(str(image_path1))
+                    image_path2=os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.jpg")
+                    cv2.imwrite(str(image_path2),img)
+                    img=cv2.imread(str(image_path2))
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    # Apply Gaussian Blur for noise reduction, add if needed
+
+                    # binarization, change '100' if needed
+                    _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+
+                    # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
+                    contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    largest_contour = max(contours, key=cv2.contourArea)
+                    M = cv2.moments(largest_contour)
+                    tempx,tempy = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+            
+                    # cv2.destroyAllWindows()
+                    if abs(tempx-x)<=20 & flag==1: # 20 stands for the maxium difference of x coordinates
+                        # send message through com
+                        ser = serial.Serial('COM1', 9600)  # 串口号和波特率
+                        ser.open() # open the com
+                        ser.write(b'True1') # send message
+                        time.sleep(0.1) # delete the sentence if not necessary
+                        ser.close
+                        time.sleep(5) # let the light spot leave camera vision, set for next spot
+                        # 观察窗口行为，是否需要写窗口刷新
+                        flag=flag+1
+                    
+                    if abs(tempx-x)<=20 & flag==2: # 20 stands for the maxium difference of x coordinates
+                        # send message through com
+                        ser = serial.Serial('COM1', 9600)  # 串口号和波特率
+                        ser.open() # open the com
+                        ser.write(b'True2') # send message
+                        time.sleep(0.1) # delete the sentence if not necessary
+                        ser.close
+                    
+
+                    # delete the temp picture; path: same with the .py file
+                    os.remove(str(image_path1))
+                    os.remove(str(image_path2))
+                    MVStartGrabWindow(self.hCam, self.winid)  # 每次循环刷新窗口图像，是否需要？
+            # end of single loop
+
+        # original code of the example:                 
+        # idn = MVGetSampleGrab(self.hCam, self.himage)
+        # print(idn.idn)
+        # fname, ok = QFileDialog.getSaveFileName(self, '打开文件', './Images' + str(idn.idn) + '.bmp', ("Images (*.bmp *.jpg *.tif *.raw)"))
+        
+        # if ok:
+        #     try:
+        #       filename = os.path.basename(fname)  # 获取到需要存储的文件名
+        #       pathname = os.path.join(os.getcwd(), filename)  # 获取带有文件名的文件路径
+        #       newfile = '\\'.join(fname.split('/')[:-1])  # 需要存储到的新文件夹
+        #       MVImageSave(self.himage, filename.encode('utf-8'))  # 将图片保存下来
+        #       if (newfile != os.getcwd()):  # 将图片移动到指定文件夹下
+        #           try:
+        #               shutil.move(pathname, newfile)
+        #           except:
+        #               os.unlink(os.path.join(newfile, filename))
+        #               shutil.move(pathname, newfile)
+        #       image = QImage(newfile + '\\' + filename)
+        #       self.label.setPixmap(QPixmap.fromImage(image))  # 加载图片
+        #     except:
+        #        return 0
+        # else:
+        #     return 0
         mode = MVGetTriggerMode(self.hCam)  # 获取当前相机采集模式
         if(mode.pMode == TriggerModeEnums.TriggerMode_Off):
             self.btnOpen.setEnabled(False)
@@ -270,7 +390,7 @@ class settingUI(QWidget):
     本类是在主窗口点击设置按钮弹出的设置子窗口，接受主窗口的相机句柄，以完成本窗口的设置功能。
     本例程列出的设置为包大小，包延迟，触发模式
     """
-
+    global x,y
     def __init__(self, hCam):
         super().__init__()
         self.hCam = hCam

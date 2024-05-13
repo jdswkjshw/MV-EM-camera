@@ -6,17 +6,13 @@ from GigECamera_Types import *
 from MVGigE import *
 
 def main():
-    # Initialize the library and camera
+    # Initialize
     MVInitLib()
     MVUpdateCameraList()
     hcam = MVOpenCamByIndex(0)
     if hcam.status != MVSTATUS_CODES.MVST_SUCCESS:
         print("Failed to open camera")
         return
-
-    # Prepare to capture
-    # Omitting MVStartGrabWindow since we're using OpenCV for display
-    #MVSetTriggerMode(camera_info.hCam, TriggerModeEnums.TriggerMode_On)  # Set trigger mode if needed
 
     # 创建一个图像对象用于接收相机图像
     width = MVGetWidth(hcam.hCam).width
@@ -25,26 +21,27 @@ def main():
     print("Width:", width, "Height:", height, "Pixel Format Enum:", pixel_format_enum)
 
     # Determine bits per pixel based on the pixel format
-    bpp = 24  # Default to 24 for color images, adjust based on actual format
-    if pixel_format_enum in [MV_PixelFormatEnums.PixelFormat_Mono8, MV_PixelFormatEnums.PixelFormat_BayerRG8]:
-        bpp = 8  # Adjust this based on actual supported formats
+    # bpp = 24  # Default to 24 for color images, adjust based on actual format
+    # if pixel_format_enum in [MV_PixelFormatEnums.PixelFormat_Mono8, MV_PixelFormatEnums.PixelFormat_BayerRG8]:
+    #     bpp = 8  # Adjust this based on actual supported formats
 
-    hImage = MVImageCreate(width, height, bpp).himage
+    # hImage = MVImageCreate(width, height, bpp).himage
    # For BayerGR8, use 8 bits per pixel
     bpp = 8
     hImage = MVImageCreate(width, height, bpp).himage
-    
-    # Capture a single frame
-    if MVSingleGrab(hcam.hCam, hImage, 1000).status != MVSTATUS_CODES.MVST_SUCCESS:
+    image_info = IMAGE_INFO()
+
+    # 采集单帧图像
+    grab_result=MVSingleGrab(hcam.hCam, hImage, 1000)
+    if grab_result.status != MVSTATUS_CODES.MVST_SUCCESS:
         print("Failed to capture image")
         return
     
-    image_info = IMAGE_INFO()  # This would need proper initialization and usage
+
     if not image_info.pImageBuffer:
         print("Image buffer is NULL")
         return
 
-    # Assuming the image buffer is accessible and correctly populated
     buffer_type = (c_ubyte * (width * height))
     image_buffer = buffer_type.from_address(addressof(image_info.pImageBuffer.contents))
     image_array = np.ctypeslib.as_array(image_buffer, shape=(height, width))
