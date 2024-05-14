@@ -3,6 +3,7 @@ from ctypes import *
 from GigECamera_Types import *
 MVCamProptySheet=windll.LoadLibrary('./MVCamProptySheet')
 
+
 class MVSetFrameRate():
     def __init__(self, hCam, fps):
         self.hCam = c_uint64(hCam)

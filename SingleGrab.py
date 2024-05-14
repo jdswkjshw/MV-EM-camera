@@ -11,10 +11,14 @@ from PyQt5.QtWidgets import QApplication, QWidget, QHBoxLayout, QVBoxLayout, QPu
 from PyQt5.QtGui import QPixmap, QPalette, QImage, QIcon
 from PyQt5.QtCore import Qt
 import numpy
+ser = serial.Serial('COM3', 9600)
+# ser.open() # open the com
 # reference coordinates
 global x,y,i
-x=0
-y=0
+x=650
+y=500
+global flag
+flag = 1
 i=True
 
 class MVCam(QWidget):
@@ -120,11 +124,11 @@ class MVCam(QWidget):
         self.width = w.width
         self.height = h.height
         self.pixelFormat = pf.pixelFormat
-        fps=25.00
-        if MVSetFrameRate(self.hCam, fps).status != MVSTATUS_CODES.MVST_SUCCESS:
-            msgBox = QMessageBox(QMessageBox.Warning, '提示', '刷新帧率设置失败！')
-            msgBox.exec()
-            return
+        # fps=59.00
+        # if MVSetFrameRate(self.hCam, fps).status != MVSTATUS_CODES.MVST_SUCCESS:
+        #     msgBox = QMessageBox(QMessageBox.Warning, '提示', '刷新帧率设置失败！')
+        #     msgBox.exec()
+        #     return
         if(self.pixelFormat == MV_PixelFormatEnums.PixelFormat_Mono8):
             self.himage = MVImageCreate(self.width, self.height, 8).himage  # 创建图像句柄
         else:
@@ -168,12 +172,12 @@ class MVCam(QWidget):
                 time.sleep(0.2)
                 while i:
 
-                    MVGetSampleGrab(self.hCam, self.himage)
+                    r=MVGetSampleGrab(self.hCam, self.himage)
                     # print(idn.idn)
                     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     image_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.bmp")
                     MVImageSave(self.himage, image_path.encode('utf-8'))
-                    print(image_path)
+                    # print(image_path)
                     img = cv2.imread(str(image_path))
                     # cv2.imshow("1",img)
                     # cv2.waitKey()
@@ -192,12 +196,15 @@ class MVCam(QWidget):
                     # Binarization
                     _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
                     #cv2.imshow("binary", binary_img)
-
+                    if binary_img.max()>20:
                     # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
-                    contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    M = cv2.moments(largest_contour)
-                    x,y = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                        contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                        largest_contour = max(contours, key=cv2.contourArea)
+                        M = cv2.moments(largest_contour)
+                        if M['m00']!=0:
+                            x,y = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                            print(x,y)
+                   
                     #print(x,y)
                     # Draw and display the processed image
                     #cv2.circle(img, (x, y), 5, (0, 255, 0), -1)
@@ -277,7 +284,7 @@ class MVCam(QWidget):
         i=True
         tempx=0
         tempy=0
-        flag=1
+        global flag
         while i:
                     
                     MVGetSampleGrab(self.hCam, self.himage)
@@ -292,39 +299,54 @@ class MVCam(QWidget):
                     # Apply Gaussian Blur for noise reduction, add if needed
 
                     # binarization, change '100' if needed
-                    _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+                    _, binary_img = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY)
 
+                    if binary_img.max()>20:
                     # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
-                    contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    M = cv2.moments(largest_contour)
-                    tempx,tempy = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
-            
+                        contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                        largest_contour = max(contours, key=cv2.contourArea)
+                        M = cv2.moments(largest_contour)
+                        if M['m00']!=0:
+                            tempx,tempy = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                        
+                            print(tempx,tempy)
+                    
                     # cv2.destroyAllWindows()
-                    if abs(tempx-x)<=20 & flag==1: # 20 stands for the maxium difference of x coordinates
-                        # send message through com
-                        ser = serial.Serial('COM1', 9600)  # 串口号和波特率
-                        ser.open() # open the com
-                        ser.write(b'True1') # send message
+                    print(abs(tempx-x),flag)
+                    if abs(tempy-y)<=10 and flag%3==1: # 20 stands for the maxium difference of x coordinates
+                        # send message through com\
+
+                        tt=f"True1={str(tempy)}" # 再发送坐标用于误差分析与校准
+
+                        ser.write(b'True1='+b"") # send message
+
                         time.sleep(0.1) # delete the sentence if not necessary
-                        ser.close
-                        time.sleep(5) # let the light spot leave camera vision, set for next spot
+                        print(tempx, tempy)
+                        print("True1")
+                        time.sleep(10) # let the light spot leave camera vision, set for next spot
                         # 观察窗口行为，是否需要写窗口刷新
                         flag=flag+1
-                    
-                    if abs(tempx-x)<=20 & flag==2: # 20 stands for the maxium difference of x coordinates
+                        tempy=0
+                    if abs(tempy-y)<=10 and flag%3==2: # 20 stands for the maxium difference of x coordinates
                         # send message through com
-                        ser = serial.Serial('COM1', 9600)  # 串口号和波特率
-                        ser.open() # open the com
+                        flag=flag+1
+                        tempy=0
+                    if abs(tempy-y)<=10 and flag%3==0: # 20 stands for the maxium difference of x coordinates
+                        # send message through com
+                    
                         ser.write(b'True2') # send message
                         time.sleep(0.1) # delete the sentence if not necessary
-                        ser.close
-                    
+                        time.sleep(8)
+                        print("True2")
+                        flag=flag+1
+                        tempy=0
+                        i=False
+
 
                     # delete the temp picture; path: same with the .py file
                     os.remove(str(image_path1))
                     os.remove(str(image_path2))
-                    MVStartGrabWindow(self.hCam, self.winid)  # 每次循环刷新窗口图像，是否需要？
+                    # MVStartGrabWindow(self.hCam, self.winid)  # 每次循环刷新窗口图像，是否需要？
             # end of single loop
 
         # original code of the example:                 
