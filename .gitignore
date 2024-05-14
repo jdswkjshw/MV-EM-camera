@@ -1,6 +1,6 @@
 # dir 不需要提交的目录
 /.vs
-/_pycache_
+/__pycache__
 /build
 ​
 # file 不需要提交的文件名
