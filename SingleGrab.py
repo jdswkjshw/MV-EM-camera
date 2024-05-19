@@ -1,23 +1,24 @@
 import sys
 import os
 import datetime
-import shutil
 import serial
 import cv2
 import time
-from MVGigE import *
+from MVGigE import *#327 c_int
 from setCameraProperties import *
 from PyQt5.QtWidgets import QApplication, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QMessageBox, QLabel, QFileDialog, QScrollArea, QComboBox, QLineEdit, QSlider, QGridLayout, QGroupBox, QCheckBox
 from PyQt5.QtGui import QPixmap, QPalette, QImage, QIcon
 from PyQt5.QtCore import Qt
-import numpy
-ser = serial.Serial('COM3', 9600)
+import numpy as np
+from scipy.optimize import curve_fit
+
+ser = serial.Serial('COM1', 9600)
 # ser.open() # open the com
 # reference coordinates
 global x,y,i
-x=650
-y=500
-global flag
+x=659
+y=493
+global flag, coordinate_data
 flag = 1
 i=True
 
@@ -165,6 +166,7 @@ class MVCam(QWidget):
         mode = MVGetTriggerMode(self.hCam)  # 获取当前相机采集模式
         source = MVGetTriggerSource(self.hCam)  # 获取当前相机信号源
         if(self.sender().text() == '开始采集'):
+            pass
             if(mode.pMode == TriggerModeEnums.TriggerMode_Off):  # 当触发模式关闭的时候，界面的行为
                 self.btnStart.setText('停止采集')
                 MVStartGrabWindow(self.hCam, self.winid)  # 将采集的图像传输到指定窗口
@@ -190,7 +192,7 @@ class MVCam(QWidget):
                     #Acv2.imshow("2",img)
                     #Acv2.waitKey()
                     # Apply Gaussian Blur for noise reduction
-                    #blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
+                    # blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
                     #cv2.imshow("blurr", blurred_img)
 
                     # Binarization
@@ -202,8 +204,9 @@ class MVCam(QWidget):
                         largest_contour = max(contours, key=cv2.contourArea)
                         M = cv2.moments(largest_contour)
                         if M['m00']!=0:
-                            x,y = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
-                            print(x,y)
+                            pass
+                            # x,y = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                            # print(x,y)
                    
                     #print(x,y)
                     # Draw and display the processed image
@@ -279,101 +282,199 @@ class MVCam(QWidget):
             self.btnSetting.setEnabled(False)
             self.btnClose.setEnabled(True)
 
-    def calculateImage(self):  # 保存图片执行本函数，在非触发模式时，只有采集暂停是才可以保存
-        global i
-        i=True
-        tempx=0
-        tempy=0
+    def calculateImage(self):  # 处理图片执行本函数，在非触发模式时，只有采集暂停是才可以保存
         global flag
+        global coordinate_data
+        global coordinate_data1
+        global i
+        i = True
+        tempx = 0
+        tempy = 0
+
+        temp_coordinates = []
+        temp_coordinates1 = []
         while i:
-                    
-                    MVGetSampleGrab(self.hCam, self.himage)
-                    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    image_path1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.bmp")
-                    MVImageSave(self.himage, image_path1.encode('utf-8'))
-                    img = cv2.imread(str(image_path1))
-                    image_path2=os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.jpg")
-                    cv2.imwrite(str(image_path2),img)
-                    img=cv2.imread(str(image_path2))
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    # Apply Gaussian Blur for noise reduction, add if needed
+            MVGetSampleGrab(self.hCam, self.himage)
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            times = datetime.datetime.now().strftime('%S.%f')
+            times = float(times) * 1000
+            image_path1 = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.bmp")
+            MVImageSave(self.himage, image_path1.encode('utf-8'))
+            img = cv2.imread(str(image_path1))
+            image_path2=os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{current_time}.jpg")
+            cv2.imwrite(str(image_path2),img)
+            img=cv2.imread(str(image_path2))
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # Apply Gaussian Blur for noise reduction, add if needed
 
-                    # binarization, change '100' if needed
-                    _, binary_img = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY)
+            # binarization, change '100' if needed
+            _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
 
-                    if binary_img.max()>20:
-                    # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
+            if binary_img.max()>20:
+            # Find contours and calculate the centroid of the largest spot, output the x and y coordinates
+                contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                largest_contour = max(contours, key=cv2.contourArea)
+                M = cv2.moments(largest_contour)
+                if M['m00']!=0:
+                    tempx,tempy = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
+                    temp_coordinates.append((tempx, tempy, times))
+                    print(tempx,tempy)
+            # cv2.destroyAllWindows()
+            print(abs(tempy-y),flag)
+            
+            if abs(tempy-y)<=10: # 20 stands for the maxium difference of coordinates
+                # temp_coordinates.append((tempx, tempy, times))
+                if flag%3==1 and abs(tempy-y)<=10:
+                    while abs(tempy-y)<=10:
+                        tempy = 0
+                        tempx = 0
+                        MVGetSampleGrab(self.hCam, self.himage)
+                        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        times = datetime.datetime.now().strftime('%S.%f')
+                        times = float(times) * 1000
+                        image_path1 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    f"{current_time}.bmp")
+                        MVImageSave(self.himage, image_path1.encode('utf-8'))
+                        img = cv2.imread(str(image_path1))
+                        image_path2 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    f"{current_time}.jpg")
+                        cv2.imwrite(str(image_path2), img)
+                        img = cv2.imread(str(image_path2))
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        # Apply Gaussian Blur for noise reduction, add if needed
+
+                        # binarization, change '100' if needed
+                        _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+                        # binary_img[623][521] = 255
                         contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
                         largest_contour = max(contours, key=cv2.contourArea)
                         M = cv2.moments(largest_contour)
-                        if M['m00']!=0:
-                            tempx,tempy = int(M['m10']/M['m00']), int(M['m01']/M['m00'])
-                        
-                            print(tempx,tempy)
-                    
-                    # cv2.destroyAllWindows()
-                    print(abs(tempx-x),flag)
-                    if abs(tempy-y)<=10 and flag%3==1: # 20 stands for the maxium difference of x coordinates
-                        # send message through com\
 
-                        tt=f"True1={str(tempy)}" # 再发送坐标用于误差分析与校准
-
-                        ser.write(b'True1='+b"") # send message
-
-                        time.sleep(0.1) # delete the sentence if not necessary
+                        tempx, tempy = int(M['m10'] / M['m00']), int(M['m01'] / M['m00'])
+                        temp_coordinates.append((tempx, tempy, times))
                         print(tempx, tempy)
+                        os.remove(str(image_path1))
+                        os.remove(str(image_path2))
                         print("True1")
-                        time.sleep(10) # let the light spot leave camera vision, set for next spot
-                        # 观察窗口行为，是否需要写窗口刷新
-                        flag=flag+1
-                        tempy=0
-                    if abs(tempy-y)<=10 and flag%3==2: # 20 stands for the maxium difference of x coordinates
-                        # send message through com
-                        flag=flag+1
-                        tempy=0
-                    if abs(tempy-y)<=10 and flag%3==0: # 20 stands for the maxium difference of x coordinates
-                        # send message through com
-                    
-                        ser.write(b'True2') # send message
-                        time.sleep(0.1) # delete the sentence if not necessary
-                        time.sleep(8)
-                        print("True2")
-                        flag=flag+1
-                        tempy=0
-                        i=False
+                    coordinate_data = temp_coordinates
+                    # Linear fit of coordinates
+                    tt = np.array([coord[2] for coord in coordinate_data])
+                    y_values = np.array([coord[1] for coord in coordinate_data])
+                    def linear_model(t, a, b):
+                        return a * t + b
+                    params, _ = curve_fit(linear_model, tt, y_values)
+                    fitted_y_values = linear_model(tt, *params)
+                    differences = np.abs(fitted_y_values - y)
+                    min_difference_idx = np.argmin(differences)
+                    best_time = coordinate_data[min_difference_idx][2]
+                    best_x = coordinate_data[min_difference_idx][0]
+                    print(f"Best time: {best_time}, Best x: {best_x}")
+                    data = "TrueA"
+                    ser.write(data.encode())
+                    time.sleep(5)
 
+                    #-----------------------COMprint
+                #    time.sleep(10) # let the light spot leave camera vision, set for next spot
+                    flag=flag+1
+
+
+                if flag%3==0 and abs(tempy-y)<=10: # 20 stands for the maximum difference of x coordinates
+                    flag=flag+1
+                    tempy=0
+                    tempx=0
+
+                if flag%3==2 and abs(tempy-y)<=10: # 20 stands for the maximum difference of x coordinates
+                    while abs(tempy - y) <= 10:
+                        tempy = 0
+                        tempx = 0
+                        MVGetSampleGrab(self.hCam, self.himage)
+                        current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        times = datetime.datetime.now().strftime('%S.%f')
+                        times = float(times) * 1000
+                        image_path1 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    f"{current_time}.bmp")
+                        MVImageSave(self.himage, image_path1.encode('utf-8'))
+                        img = cv2.imread(str(image_path1))
+                        image_path2 = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    f"{current_time}.jpg")
+                        cv2.imwrite(str(image_path2), img)
+                        img = cv2.imread(str(image_path2))
+                        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        # Apply Gaussian Blur for noise reduction, add if needed
+
+                        # binarization, change '100' if needed
+                        _, binary_img = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)
+                        # binary_img[623][521] = 255
+                        contours, _ = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                        largest_contour = max(contours, key=cv2.contourArea)
+                        M = cv2.moments(largest_contour)
+
+                        tempx, tempy = int(M['m10'] / M['m00']), int(M['m01'] / M['m00'])
+                        temp_coordinates1.append((tempx, tempy, times))
+                        print(tempx, tempy)
+                        os.remove(str(image_path1))
+                        os.remove(str(image_path2))
+                        print("True2")
+                    coordinate_data1 = temp_coordinates1
+                    # Linear fit of coordinates
+                    tt = np.array([coord[2] for coord in coordinate_data1])
+                    y_values = np.array([coord[1] for coord in coordinate_data1])
+
+                    def linear_model(t, a, b):
+                        return a * t + b
+
+                    params, _ = curve_fit(linear_model, tt, y_values)
+                    fitted_y_values = linear_model(tt, *params)
+                    differences = np.abs(fitted_y_values - y)
+                    min_difference_idx = np.argmin(differences)
+                    best_time = coordinate_data[min_difference_idx][2]
+                    best_x = coordinate_data[min_difference_idx][0]
+                    print(f"Best time: {best_time}, Best x: {best_x}")
+                    data = "TrueB"
+                    ser.write(data.encode())
+                    time.sleep(5)
+
+                    # -----------------------COMprint
+                    #    time.sleep(10) # let the light spot leave camera vision, set for next spot
+                    # 观察窗口行为，是否需要写窗口刷新
+                    flag = flag + 1
+                    i = False
+       
 
                     # delete the temp picture; path: same with the .py file
-                    os.remove(str(image_path1))
-                    os.remove(str(image_path2))
+
                     # MVStartGrabWindow(self.hCam, self.winid)  # 每次循环刷新窗口图像，是否需要？
             # end of single loop
+        # if abs(tempy-y)>10:
+        #     coordinate_data = temp_coordinates
+        # # Linear fit of coordinates
+        #     tt = np.array([coord[2] for coord in coordinate_data])
+        #     y_values = np.array([coord[1] for coord in coordinate_data])
+        #     def linear_model(t, a, b):
+        #         return a * t + b
+        #     params, _ = curve_fit(linear_model, tt, y_values)
+        #     fitted_y_values = linear_model(tt, *params)
+        #     differences = np.abs(fitted_y_values - y)
+        #     min_difference_idx = np.argmin(differences)
+        #     best_time = coordinate_data[min_difference_idx][2]
+        #     best_x = coordinate_data[min_difference_idx][0]
+        #     print(f"Best time: {best_time}, Best x: {best_x}")
 
-        # original code of the example:                 
-        # idn = MVGetSampleGrab(self.hCam, self.himage)
-        # print(idn.idn)
-        # fname, ok = QFileDialog.getSaveFileName(self, '打开文件', './Images' + str(idn.idn) + '.bmp', ("Images (*.bmp *.jpg *.tif *.raw)"))
-        
-        # if ok:
-        #     try:
-        #       filename = os.path.basename(fname)  # 获取到需要存储的文件名
-        #       pathname = os.path.join(os.getcwd(), filename)  # 获取带有文件名的文件路径
-        #       newfile = '\\'.join(fname.split('/')[:-1])  # 需要存储到的新文件夹
-        #       MVImageSave(self.himage, filename.encode('utf-8'))  # 将图片保存下来
-        #       if (newfile != os.getcwd()):  # 将图片移动到指定文件夹下
-        #           try:
-        #               shutil.move(pathname, newfile)
-        #           except:
-        #               os.unlink(os.path.join(newfile, filename))
-        #               shutil.move(pathname, newfile)
-        #       image = QImage(newfile + '\\' + filename)
-        #       self.label.setPixmap(QPixmap.fromImage(image))  # 加载图片
-        #     except:
-        #        return 0
-        # else:
-        #     return 0
+            # if flag%3==1:
+            #     best=f"Best time: {best_time}, Best x: {best_x}"
+            #     data="TrueA"+ str(best)
+            #     ser.write(data.encode())
+            #     time.sleep(0.1)
+            #     coordinate_data.clear()
+            # if flag%3==0:
+            #     best=f"Best time: {best_time}, Best x: {best_x}"
+            #     data="TrueB"+ str(best)
+            #     ser.write(data.encode())
+            #     time.sleep(0.1)
+            #     coordinate_data.clear()
+
         mode = MVGetTriggerMode(self.hCam)  # 获取当前相机采集模式
-        if(mode.pMode == TriggerModeEnums.TriggerMode_Off):
+        if (mode.pMode == TriggerModeEnums.TriggerMode_Off):
             self.btnOpen.setEnabled(False)
             self.combo.setEnabled(True)
             self.btnStart.setEnabled(True)
@@ -389,6 +490,8 @@ class MVCam(QWidget):
             self.btnSave.setEnabled(True)
             self.btnSetting.setEnabled(True)
             self.btnClose.setEnabled(True)
+
+
 
     def closeCam(self):  # 关闭相机执行本函数
         result = MVCloseCam(self.hCam)
